@@ -20,9 +20,6 @@ PAYLOAD = "\x18\x03\x01\x00\x03\x01\x40\x00" #  0x4000 = 16384 = 2^14, max value
 
 SERVER_HELLO_DONE = "\x0e\x00\x00\x00"
 
-OK_PORT="Couldn't connect on port"
-UNKNOWN_CONN_REF="Connection refused"
-
 module ContentType
   ALERT = "\x15"
   HEARTBEAT = "\x18"
