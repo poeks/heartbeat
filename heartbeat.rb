@@ -48,7 +48,9 @@ class Heartbeat
       TLSRecord.new(type, version, value)
     end
   rescue NoMethodError => e
-    puts e.to_s
+    nil
+  rescue Errno::ECONNRESET
+    TLSRecord.new("Connection reset", 0, 0)
   end
 
   def read_until_server_hello_done(sock)
@@ -56,6 +58,8 @@ class Heartbeat
       record = read_record(sock)
       break if record.value == SERVER_HELLO_DONE
     end
+  rescue NoMethodError => e
+    nil
   end
 
   def go server, port=nil
@@ -66,7 +70,9 @@ class Heartbeat
            rescue Timeout::Error
              return "#{server}\tUNKNOWN\tCouldn't connect to #{server}:#{port}"
            rescue Errno::ECONNREFUSED
-             return "#{server}\tUNKNWON\tConnection refused"
+             return "#{server}\tUNKNOWN\tConnection refused"
+           rescue SocketError
+             return "#{server}\tUNKNOWN\tSite is down"
            end
 
     sock.write(CLIENT_HELLO)
@@ -77,20 +83,29 @@ class Heartbeat
       return "#{server}\tUNKNOWN\tCouldn't establish TLS connection."
     end
 
-    sock.write(PAYLOAD)
+    begin
+      sock.write(PAYLOAD)
+    rescue Errno::EPIPE
+      return "#{server}\tUNKNOWN\tBroken pipe while writing payload."
+    end
 
     begin
       heartbeat = read_record(sock)
 
-      case heartbeat.type
-      when ContentType::HEARTBEAT
-        return "#{server}\tFAIL\tServer vulnerable!" if heartbeat.value
-        return "#{server}\tPASS\tServer sent a heartbeat response, but no data. This is OK."
-      when ContentType::ALERT
-        return "#{server}\tPASS\tServer sent an alert instead of a heartbeat response. This is OK."
+      if heartbeat
+        case heartbeat.type
+        when ContentType::HEARTBEAT
+          return "#{server}\tFAIL\tServer vulnerable!" if heartbeat.value
+          return "#{server}\tPASS\tServer sent a heartbeat response, but no data. This is OK."
+        when ContentType::ALERT
+          return "#{server}\tPASS\tServer sent an alert instead of a heartbeat response. This is OK."
+        else
+          return "#{server}\tUNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
+        end
       else
-        return "#{server}\tUNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
+        return "#{server}\tUNKNOWN\tCouldn't read record."
       end
+
     rescue Timeout::Error
       return "#{server}\tPASS\tReceived a timeout when waiting for heartbeat response. This is OK."
     end
@@ -117,7 +132,7 @@ class Reader
     loop_contents load_file(file) do |stuff|
       if stuff.is_a?(Array) and stuff.size > 1
         response = h.go stuff[1], port
-        puts response unless response =~ /PASS/
+        puts response if response =~ /FAIL/
       else
         puts "Not an array #{stuff}"
       end
