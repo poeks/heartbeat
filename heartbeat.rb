@@ -118,9 +118,11 @@ class Reader
   def go file, port
     h = Heartbeat.new
     loop_contents load_file(file) do |stuff|
-      unless stuff.is_a? Array.class and stuff[1]
+      if stuff.is_a?(Array) and stuff.size > 1
         response = h.go stuff[1], port
         print response
+      else
+        puts "Not an array #{stuff}"
       end
     end
   end
