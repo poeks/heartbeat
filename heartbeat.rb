@@ -93,7 +93,7 @@ class Heartbeat
         return "PASS\tServer sent an alert instead of a heartbeat response. This is OK."
       else
         return "UNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
-      end   
+      end 
     rescue Timeout::Error
       return "OK\tReceived a timeout when waiting for heartbeat response. This is OK."
     end
@@ -132,7 +132,7 @@ if server =~ /\.csv$/
   r.go server, port
 else
   h = Heartbeat.new
-  h.go server, port
+  puts h.go server, port
 end
 
 puts ""
