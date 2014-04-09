@@ -63,7 +63,7 @@ class Heartbeat
     raise "Usage: ruby heartbeat.rb <server>" unless server
 
     print "\n#{server}\t"
-    
+
     sock = begin
              Timeout.timeout(3) { TCPSocket.open(server, port) }
            rescue Timeout::Error
@@ -93,7 +93,7 @@ class Heartbeat
         return "PASS\tServer sent an alert instead of a heartbeat response. This is OK."
       else
         return "UNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
-      end 
+      end
     rescue Timeout::Error
       return "OK\tReceived a timeout when waiting for heartbeat response. This is OK."
     end
@@ -116,12 +116,15 @@ class Reader
   end
 
   def go file, port
+    h = Heartbeat.new
     loop_contents load_file(file) do |stuff|
-      h = Heartbeat.new
-      response = h.go stuff[1], port
-      print response
+      unless stuff.is_a? Array.class and stuff[1]
+        response = h.go stuff[1], port
+        print response
+      end
     end
   end
+
 end
 
 server = ARGV[0]
