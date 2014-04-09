@@ -50,6 +50,8 @@ class Heartbeat
       value = length > 0 ? sock.read(length) : nil
       TLSRecord.new(type, version, value)
     end
+  rescue NoMethodError => e
+    puts e.to_s
   end
 
   def read_until_server_hello_done(sock)
@@ -62,14 +64,12 @@ class Heartbeat
   def go server, port=nil
     raise "Usage: ruby heartbeat.rb <server>" unless server
 
-    print "\n#{server}\t"
-
     sock = begin
              Timeout.timeout(3) { TCPSocket.open(server, port) }
            rescue Timeout::Error
-             return "UNKNOWN\tCouldn't connect to #{server}:#{port}"
+             return "#{server}\tUNKNOWN\tCouldn't connect to #{server}:#{port}"
            rescue Errno::ECONNREFUSED
-             return "UNKNWON\tConnection refused"
+             return "#{server}\tUNKNWON\tConnection refused"
            end
 
     sock.write(CLIENT_HELLO)
@@ -77,7 +77,7 @@ class Heartbeat
     begin
       read_until_server_hello_done(sock)
     rescue Timeout::Error
-      return "UNKNOWN\tCouldn't establish TLS connection."
+      return "#{server}\tUNKNOWN\tCouldn't establish TLS connection."
     end
 
     sock.write(PAYLOAD)
@@ -87,15 +87,15 @@ class Heartbeat
 
       case heartbeat.type
       when ContentType::HEARTBEAT
-        return "FAIL\tServer vulnerable!" if heartbeat.value
-        return "PASS\tServer sent a heartbeat response, but no data. This is OK."
+        return "#{server}\tFAIL\tServer vulnerable!" if heartbeat.value
+        return "#{server}\tPASS\tServer sent a heartbeat response, but no data. This is OK."
       when ContentType::ALERT
-        return "PASS\tServer sent an alert instead of a heartbeat response. This is OK."
+        return "#{server}\tPASS\tServer sent an alert instead of a heartbeat response. This is OK."
       else
-        return "UNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
+        return "#{server}\tUNKNOWN\tServer sent an unexpected ContentType: #{heartbeat.type.inspect}"
       end
     rescue Timeout::Error
-      return "OK\tReceived a timeout when waiting for heartbeat response. This is OK."
+      return "#{server}\tPASS\tReceived a timeout when waiting for heartbeat response. This is OK."
     end
 
   end
@@ -120,7 +120,7 @@ class Reader
     loop_contents load_file(file) do |stuff|
       if stuff.is_a?(Array) and stuff.size > 1
         response = h.go stuff[1], port
-        print response
+        puts response unless response =~ /PASS/
       else
         puts "Not an array #{stuff}"
       end
